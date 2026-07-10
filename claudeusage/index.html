@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>tr('Claude Usage')</title>
+    <link rel="icon" type="image/svg+xml" href="resources/icon.svg" />
+
+    <!-- Connection -->
+    <meta name="x-icue-property" content="bridgeUrl" data-label="tr('Bridge URL')" data-type="textfield" data-default="'http://localhost:8787'" />
+    <meta name="x-icue-property" content="bridgeToken" data-label="tr('Bridge Token')" data-type="textfield" data-default="''" />
+    <meta name="x-icue-property" content="pollSeconds" data-label="tr('Refresh')" data-type="slider" data-default="2" data-min="1" data-max="30" data-step="1" data-unit-label="'s'" />
+    <meta name="x-icue-property" content="framing" data-label="tr('Show')" data-type="tab-buttons" data-default="'used'" data-values="[{'key':'used','value':tr('Used')},{'key':'left','value':tr('Left')}]" />
+    <meta name="x-icue-property" content="idleMinutes" data-label="tr('Inactivity timeout')" data-type="slider" data-default="30" data-min="1" data-max="180" data-step="1" data-unit-label="'m'" />
+
+    <!-- Personalization -->
+    <meta name="x-icue-property" content="textColor" data-label="tr('Text Color')" data-type="color" data-default="'#ffffff'" />
+    <meta name="x-icue-property" content="accentColor" data-label="tr('Accent Color')" data-type="color" data-default="'#3d8bee'" />
+    <meta name="x-icue-property" content="backgroundColor" data-label="tr('Background Color')" data-type="color" data-default="'#14161a'" />
+    <meta name="x-icue-property" content="transparency" data-label="tr('Background Transparency')" data-type="slider" data-default="100" data-min="0" data-max="100" data-step="1" data-unit-label="'%'" />
+
+    <script id="x-icue-groups" type="application/json">
+    [
+      { "title": "tr('Connection')", "properties": ["bridgeUrl", "bridgeToken", "pollSeconds", "framing", "idleMinutes"], "info": "tr('Paste the token from your .xeneon-bridge config.json, and keep the bridge running.')" },
+      { "title": "tr('Widget Personalization')", "properties": ["textColor", "accentColor", "backgroundColor", "transparency"] }
+    ]
+    </script>
+
+    <style>
+      :root {
+        --u: 1vmin;
+
+        /* Personalization-overridable (set by JS) */
+        --s-ink: #ffffff;
+        --s-accent: #3d8bee;
+        --s-bg: #14161a;
+        --bg-opacity: 1;
+
+        /* Derived ink so secondary/muted track the chosen text color */
+        --s-ink-2: color-mix(in oklab, var(--s-ink) 74%, transparent);
+        --s-muted: color-mix(in oklab, var(--s-ink) 50%, transparent);
+        --s-track: color-mix(in oklab, var(--s-ink) 12%, transparent);
+        --s-hair: color-mix(in oklab, var(--s-ink) 12%, transparent);
+
+        /* Fixed semantics */
+        --s-good: #17b24a;
+        --sev-warn: #fab219;
+        --sev-serious: #ec835a;
+        --sev-crit: #e2504f;
+
+        /* Tokens derived from the baseline */
+        --pad-y: calc(var(--u) * 6);
+        --pad-x: calc(var(--u) * 6.5);
+        --gap: calc(var(--u) * 4.5);
+
+        --mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+        --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      [hidden] { display: none !important; }
+      html, body { width: 100%; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+      body { background: transparent; color: var(--s-ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+      .bg {
+        position: fixed; inset: 0; z-index: 0;
+        background: radial-gradient(120% 140% at 50% 0%,
+          color-mix(in oklab, var(--s-bg) 88%, #ffffff 6%), var(--s-bg));
+        opacity: var(--bg-opacity);
+      }
+
+      .w {
+        position: fixed; inset: 0; z-index: 1;
+        padding: var(--pad-y) var(--pad-x);
+        display: flex; flex-direction: column; gap: var(--gap);
+      }
+
+      .w-head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u)*3); color: var(--s-muted); }
+      .w-brand { display: inline-flex; align-items: center; gap: calc(var(--u)*2.2); min-width: 0; }
+      .w-dot { width: calc(var(--u)*2.4); height: calc(var(--u)*2.4); border-radius: 50%; background: var(--s-good); flex: none; box-shadow: 0 0 calc(var(--u)*2) var(--s-good); }
+      .w-brand .t { font-size: calc(var(--u)*3.4); font-weight: 640; letter-spacing: 0.11em; text-transform: uppercase; color: var(--s-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .w-model { font-size: calc(var(--u)*3.4); color: var(--s-muted); font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+      .switch { display: inline-flex; align-items: center; gap: calc(var(--u)*1.4); min-width: 0; }
+      /* Vertical padding is cancelled by equal negative margin so the buttons keep a
+         large tap area without making the header taller than the one-line brand —
+         that height delta is what pushed the costline past the bottom padding when
+         the multi-session switcher appeared. */
+      .sw-btn { -webkit-appearance: none; appearance: none; background: none; border: none; color: var(--s-ink-2); font-family: var(--sans); cursor: pointer; line-height: 1; font-size: calc(var(--u)*4); font-weight: 700; padding: calc(var(--u)*1.4) calc(var(--u)*1.6); margin-top: calc(var(--u)*-1.4); margin-bottom: calc(var(--u)*-1.4); outline: none; }
+      .sw-btn:active { color: var(--s-ink); }
+      .sw-label { font-size: calc(var(--u)*3.2); font-weight: 620; letter-spacing: 0.06em; color: var(--s-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; text-transform: none; }
+
+      .w-body { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
+
+      .lim { display: flex; flex-direction: column; gap: calc(var(--u)*2); }
+      .lim-top { display: flex; align-items: baseline; justify-content: space-between; gap: calc(var(--u)*2); }
+      .lim-label { font-size: calc(var(--u)*3.2); letter-spacing: 0.13em; text-transform: uppercase; color: var(--s-muted); font-weight: 620; white-space: nowrap; }
+      .lim-reset { font-family: var(--mono); font-size: calc(var(--u)*3); color: var(--s-ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .lim-val { display: flex; align-items: baseline; gap: calc(var(--u)*1.6); }
+      .lim-val .n { font-weight: 700; letter-spacing: -0.02em; line-height: 0.95; }
+      .lim-val .u { font-size: calc(var(--u)*3.4); color: var(--s-muted); font-weight: 600; }
+
+      .meter { position: relative; width: 100%; background: var(--s-track); border-radius: 999px; overflow: hidden; }
+      .meter > span { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 999px; background: var(--s-accent); transition: width 0.4s ease; }
+
+      .hero .lim-val .n { font-size: calc(var(--u)*22); }
+      .hero .meter { height: calc(var(--u)*3.6); }
+      .sub .lim-val .n { font-size: calc(var(--u)*10); }
+      .sub .meter { height: calc(var(--u)*2.6); }
+
+      .ctx { display: flex; flex-direction: column; gap: calc(var(--u)*1.6); }
+      .ctx-top { display: flex; align-items: baseline; justify-content: space-between; }
+      .ctx .lim-label { font-size: calc(var(--u)*2.9); }
+      .ctx .val { font-family: var(--mono); font-size: calc(var(--u)*3); color: var(--s-ink-2); font-variant-numeric: tabular-nums; }
+      .ctx .meter { height: calc(var(--u)*1.8); }
+      .ctx .meter > span { opacity: 0.85; }
+
+      .secondary { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
+
+      .costline {
+        display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u)*3);
+        padding-top: calc(var(--u)*3); margin-top: auto; border-top: 1px solid var(--s-hair);
+        color: var(--s-muted); font-size: calc(var(--u)*3);
+      }
+      .costline .cost { color: var(--s-ink-2); font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 560; }
+      .costline .dur { color: var(--s-muted); }
+      .costline .fresh { display: inline-flex; align-items: center; gap: calc(var(--u)*1.6); white-space: nowrap; }
+      .costline .fresh i { width: calc(var(--u)*1.8); height: calc(var(--u)*1.8); border-radius: 50%; background: var(--s-good); display: inline-block; }
+
+      /* Overlay for connecting / no-token / waiting / offline-no-data */
+      .overlay {
+        position: fixed; inset: 0; z-index: 2; display: none; align-items: center; justify-content: center;
+        padding: calc(var(--u)*8); text-align: center;
+        background: color-mix(in oklab, var(--s-bg) 78%, transparent);
+      }
+      .overlay-msg { font-size: calc(var(--u)*4.2); color: var(--s-ink-2); font-weight: 560; line-height: 1.35; max-width: 90%; }
+
+      /* ---- Responsive composition (aspect-ratio, per iCUE skill Rule 3) ---- */
+      /* Default: tall / near-square (M-H 1.21, M-V 0.83) -> full layout. */
+
+      /* Wide (S-V ~1.67): drop context to protect the two limits */
+      @media (min-aspect-ratio: 1.42/1) {
+        :root { --gap: calc(var(--u) * 3.5); --pad-y: calc(var(--u) * 5.5); }
+        .ctx { display: none; }
+        .hero .lim-val .n { font-size: calc(var(--u)*20); }
+      }
+
+      /* Very wide + short (S-H 2.44): big 5-hour hero left; weekly + context + cost stacked right */
+      @media (min-aspect-ratio: 2.05/1) {
+        :root { --pad-x: calc(var(--u)*6); --pad-y: calc(var(--u)*5); }
+        .w { gap: calc(var(--u)*2.5); }
+        .w-head { flex: none; }
+        .w-brand .t, .w-model, .sw-label { font-size: calc(var(--u)*3.8); }
+        .sw-btn { font-size: calc(var(--u)*5.2); }
+        .w-body { flex-direction: row; align-items: stretch; gap: calc(var(--u)*7); }
+
+        .hero { flex: 1.1; justify-content: center; gap: calc(var(--u)*3.5); }
+        .hero .lim-label { font-size: calc(var(--u)*5); }
+        .hero .lim-reset { font-size: calc(var(--u)*4.2); }
+        .hero .lim-val .u { font-size: calc(var(--u)*4.8); }
+        .hero .lim-val .n { font-size: calc(var(--u)*40); }
+        .hero .meter { height: calc(var(--u)*5.4); }
+
+        .secondary { flex: 1; justify-content: center; gap: calc(var(--u)*3.5); }
+        .ctx { display: flex; }
+        .secondary .lim-label { font-size: calc(var(--u)*3.7); }
+        .sub .lim-reset { font-size: calc(var(--u)*3.5); }
+        .sub .lim-val .n { font-size: calc(var(--u)*17); }
+        .sub .lim-val .u { font-size: calc(var(--u)*3.6); }
+        .sub .meter { height: calc(var(--u)*3.4); }
+        .ctx .val { font-size: calc(var(--u)*3.5); }
+        .ctx .meter { height: calc(var(--u)*2.2); }
+        .costline { margin-top: 0; padding-top: 0; border-top: none; font-size: calc(var(--u)*3.5); }
+      }
+
+      @media (prefers-reduced-motion: reduce) { .meter > span { transition: none; } }
+    </style>
+</head>
+<body>
+    <div class="bg"></div>
+    <div class="w">
+        <div class="w-head">
+            <span class="w-brand">
+                <span class="w-dot" id="dot"></span>
+                <span class="t" id="brand">Claude</span>
+                <span class="switch" id="switch" hidden>
+                    <button class="sw-btn sw-prev" id="swPrev" aria-label="previous session">‹</button>
+                    <span class="sw-label" id="swLabel"></span>
+                    <button class="sw-btn sw-next" id="swNext" aria-label="next session">›</button>
+                </span>
+            </span>
+            <span class="w-model" id="model"></span>
+        </div>
+        <div class="w-body">
+            <div class="lim hero">
+                <div class="lim-top"><span class="lim-label">5-hour limit</span><span class="lim-reset" id="r5"></span></div>
+                <div class="lim-val"><span class="n" id="n5">—</span><span class="u" id="u5">% used</span></div>
+                <div class="meter"><span id="m5"></span></div>
+            </div>
+            <div class="secondary">
+                <div class="lim sub">
+                    <div class="lim-top"><span class="lim-label">Weekly</span><span class="lim-reset" id="rw"></span></div>
+                    <div class="lim-val"><span class="n" id="nw">—</span><span class="u" id="uw">% used</span></div>
+                    <div class="meter"><span id="mw"></span></div>
+                </div>
+                <div class="ctx">
+                    <div class="ctx-top"><span class="lim-label">Context</span><span class="val" id="cval">—</span></div>
+                    <div class="meter"><span id="mc"></span></div>
+                </div>
+                <div class="costline">
+                    <span class="cost"><span id="cost">—</span><span class="dur" id="dur"></span></span>
+                    <span class="fresh"><i id="fdot"></i> <span id="freshtext">connecting…</span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="overlay" id="overlay"><div class="overlay-msg" id="overlayMsg"></div></div>
+
+    <script>
+      // iCUE event bridge — bare assignment is required.
+      icueEvents = {
+        onICUEInitialized: onReady,
+        onDataUpdated: onReady
+      };
+
+      function getIcueProperty(name) {
+        if (typeof window !== 'undefined' && Object.prototype.hasOwnProperty.call(window, name)) {
+          const value = window[name];
+          if (value !== undefined && value !== null && value !== '') return value;
+        }
+        try {
+          const value = Function('return typeof ' + name + ' !== "undefined" ? ' + name + ' : undefined')();
+          if (value !== undefined && value !== null && value !== '') return value;
+        } catch (e) {}
+        return undefined;
+      }
+
+      const q = new URLSearchParams(location.search);
+      function prop(name, dflt) {
+        const v = getIcueProperty(name);
+        if (v !== undefined && v !== null && v !== '') return v;
+        if (name === 'bridgeToken' && q.get('token')) return q.get('token'); // browser dev
+        if (name === 'bridgeUrl' && q.get('url')) return q.get('url');       // browser dev
+        return dflt;
+      }
+
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v)));
+      const numOr = (v) => (typeof v === 'number' && !isNaN(v)) ? v : null;
+      const $ = (id) => document.getElementById(id);
+
+      function severity(p) {
+        if (p >= 97) return 'var(--sev-crit)';
+        if (p >= 90) return 'var(--sev-serious)';
+        if (p >= 75) return 'var(--sev-warn)';
+        return 'var(--s-accent)';
+      }
+
+      function fmtCountdown(secs) {
+        if (secs === null || secs === undefined) return '';
+        if (secs <= 0) return 'now';
+        const d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600), m = Math.floor((secs % 3600) / 60);
+        if (d > 0) return d + 'd ' + h + 'h';
+        if (h > 0) return h + 'h ' + String(m).padStart(2, '0') + 'm';
+        return m + 'm';
+      }
+      function fmtAge(secs) {
+        secs = Math.max(0, Math.floor(secs));
+        if (secs < 60) return secs + 's ago';
+        const m = Math.floor(secs / 60);
+        if (m < 60) return m + 'm ago';
+        return Math.floor(m / 60) + 'h ago';
+      }
+      function fmtDur(ms) {
+        const s = Math.floor(ms / 1000);
+        if (s < 60) return s + 's';
+        const m = Math.floor(s / 60);
+        if (m < 60) return m + 'm';
+        const h = Math.floor(m / 60);
+        return h + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+      }
+
+      function setDot(color) {
+        const d = $('dot'); d.style.background = color; d.style.boxShadow = '0 0 calc(var(--u)*2) ' + color;
+        $('fdot').style.background = color;
+      }
+      function setFresh(t) { $('freshtext').textContent = t; }
+      function setOverlay(msg, show) {
+        $('overlayMsg').textContent = msg || '';
+        $('overlay').style.display = show ? 'flex' : 'none';
+      }
+
+      function applyStyles() {
+        const r = document.documentElement.style;
+        r.setProperty('--s-ink', prop('textColor', '#ffffff'));
+        r.setProperty('--s-accent', prop('accentColor', '#3d8bee'));
+        r.setProperty('--s-bg', prop('backgroundColor', '#14161a'));
+        r.setProperty('--bg-opacity', String(clamp(prop('transparency', 100), 0, 100) / 100));
+      }
+
+      let timer = null;
+      let lastUsage = null;
+
+      // --- Multi-session switcher ---
+      const SWITCH_MODE = 'tap';   // 'tap' (default) | 'rotate' (no-touch fallback)
+      const ROTATE_MS = 5000;
+      let pinnedId = null;         // session_id currently shown (sticky)
+      let liveSessions = [];       // live sessions from the last poll, first-seen order
+      let lastNow = 0;             // bridge_time from the last poll (for tap re-render)
+      let rotateTimer = null;
+
+      function onReady() {
+        applyStyles();
+        if (timer) clearInterval(timer);
+        poll();
+        const s = clamp(prop('pollSeconds', 2), 1, 30);
+        timer = setInterval(poll, s * 1000);
+      }
+
+      async function poll() {
+        const base = String(prop('bridgeUrl', 'http://localhost:8787')).replace(/\/+$/, '');
+        const token = prop('bridgeToken', '');
+        if (!token) { setDot('var(--sev-crit)'); setFresh('no token'); if (!lastUsage) setOverlay('Add your bridge token in settings', true); return; }
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 4000);
+          const res = await fetch(base + '/v1/state', { headers: { 'X-Bridge-Token': token }, signal: ctrl.signal, cache: 'no-store' });
+          clearTimeout(t);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          onState(await res.json());
+        } catch (e) {
+          setDot('var(--sev-crit)'); setFresh('bridge offline');
+          if (!lastUsage) setOverlay('Bridge offline — is xeneon-bridge serve running?', true);
+        }
+      }
+
+      function sessionsFrom(st) {
+        if (st && Array.isArray(st.sessions) && st.sessions.length) return st.sessions;
+        if (st && st.usage) return [st.usage];
+        return [];
+      }
+
+      function onState(st) {
+        const now = (st && st.bridge_time != null) ? st.bridge_time : Math.floor(Date.now() / 1000);
+        lastNow = now;
+        const idleSecs = clamp(prop('idleMinutes', 30), 1, 180) * 60;
+
+        // A session is shown only if it is within the inactivity timeout AND has
+        // started doing real work. A freshly-launched or resume-transient session
+        // posts once with $0 cost and 0 context, then goes silent — never list it.
+        // Real sessions are kept for the full timeout no matter how long they've been
+        // quiet (a session that's just thinking still counts as live); the only
+        // time-based expiry is the single inactivity-timeout window, nothing shorter.
+        const hasUsage = (s) => (numOr(s.cost_usd) || 0) > 0 || (numOr(s.context_pct) || 0) > 0;
+        const list = sessionsFrom(st).filter(s =>
+          s && (now - (s.received_at || 0)) <= idleSecs && hasUsage(s));
+
+        if (!list.length) {
+          // No session with real usage within the timeout — nothing to show.
+          lastUsage = null; pinnedId = null;
+          liveSessions = [];
+          updateSwitcher(liveSessions);
+          setDot('var(--s-muted)'); setFresh('idle');
+          setOverlay('Waiting for Claude Code…', true);
+          return;
+        }
+        liveSessions = list;
+
+        // Sticky pin: keep the chosen session; only re-pick if it left the list.
+        let pinned = list.find(s => (s.session_id || '') === pinnedId);
+        if (!pinned) {
+          pinned = list.reduce((a, b) => ((b.received_at || 0) > (a.received_at || 0) ? b : a));
+          pinnedId = pinned.session_id || '';
+        }
+        lastUsage = pinned;
+        setOverlay('', false);
+        updateSwitcher(list);
+        render(pinned, now);
+      }
+
+      function updateSwitcher(live) {
+        const multi = live.length >= 2;
+        $('brand').hidden = multi;
+        $('switch').hidden = !multi;
+        if (!multi) { stopRotate(); return; }
+        const idx = Math.max(0, live.findIndex(s => (s.session_id || '') === pinnedId));
+        const cur = live[idx] || live[0];
+        const label = (cur.folder && String(cur.folder).trim())
+          || (cur.model || '').replace(/\s*\(.*$/, '')
+          || 'session';
+        $('swLabel').textContent = label + '  ' + (idx + 1) + '/' + live.length;
+        const tap = (SWITCH_MODE === 'tap');
+        $('swPrev').style.display = tap ? '' : 'none';
+        $('swNext').style.display = tap ? '' : 'none';
+        if (SWITCH_MODE === 'rotate') startRotate();
+      }
+
+      function step(delta) {
+        if (liveSessions.length < 2) return;
+        let idx = liveSessions.findIndex(s => (s.session_id || '') === pinnedId);
+        if (idx < 0) idx = 0;
+        idx = (idx + delta + liveSessions.length) % liveSessions.length;
+        const pinned = liveSessions[idx];
+        pinnedId = pinned.session_id || '';
+        lastUsage = pinned;
+        updateSwitcher(liveSessions);
+        render(pinned, lastNow);
+      }
+
+      function startRotate() { if (!rotateTimer) rotateTimer = setInterval(() => step(1), ROTATE_MS); }
+      function stopRotate() { if (rotateTimer) { clearInterval(rotateTimer); rotateTimer = null; } }
+
+      function renderLimit(k, pct, resetSecs, framing) {
+        const n = $('n' + k), un = $('u' + k), m = $('m' + k), r = $('r' + k);
+        r.textContent = (resetSecs === null) ? '' : 'resets ' + fmtCountdown(resetSecs);
+        if (pct === null) { n.textContent = '—'; un.style.display = 'none'; m.style.width = '0%'; return; }
+        un.style.display = '';
+        const used = clamp(pct, 0, 100);
+        if (framing === 'left') { n.textContent = Math.round(100 - used); un.textContent = '% left'; }
+        else { n.textContent = Math.round(used); un.textContent = '% used'; }
+        m.style.width = used + '%';
+        m.style.background = severity(used);
+      }
+
+      function render(u, now) {
+        const framing = prop('framing', 'used');
+        const sub = (at) => (at === null || at === undefined) ? null : (at - now);
+        renderLimit('5', numOr(u.five_hour_pct), sub(u.five_hour_resets_at), framing);
+        renderLimit('w', numOr(u.weekly_pct), sub(u.weekly_resets_at), framing);
+
+        const c = numOr(u.context_pct);
+        $('cval').textContent = (c === null) ? '—' : Math.round(c) + '%';
+        $('mc').style.width = (c === null ? 0 : clamp(c, 0, 100)) + '%';
+
+        const cost = numOr(u.cost_usd);
+        $('cost').textContent = (cost === null) ? '—' : '$' + cost.toFixed(2);
+        const durMs = numOr(u.duration_ms);
+        $('dur').textContent = (durMs === null || durMs <= 0) ? '' : ' · ' + fmtDur(durMs);
+        $('model').textContent = (u.model || '').replace(/\s*\(.*$/, '');
+        $('brand').textContent = 'Claude · Max';
+
+        const age = (now || 0) - (u.received_at || 0);
+        if (age > 90) { setDot('var(--sev-warn)'); setFresh('idle ' + fmtAge(age)); }
+        else { setDot('var(--s-good)'); setFresh('updated ' + fmtAge(age)); }
+      }
+
+      $('swPrev').addEventListener('click', () => step(-1));
+      $('swNext').addEventListener('click', () => step(1));
+
+      // Swipe left/right anywhere on the widget to flip session (instant).
+      // A near-stationary press falls through to the arrow buttons' click handlers.
+      const SWIPE_MIN_PX = 30;
+      let swipeX = null, swipeY = null;
+      document.addEventListener('pointerdown', (e) => { swipeX = e.clientX; swipeY = e.clientY; });
+      document.addEventListener('pointercancel', () => { swipeX = swipeY = null; });
+      document.addEventListener('pointerup', (e) => {
+        if (swipeX === null) return;
+        const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
+        swipeX = swipeY = null;
+        if (Math.abs(dx) >= SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
+      });
+
+      // Initial render — works both inside iCUE and when opened directly in a browser.
+      if (typeof iCUE_initialized !== 'undefined' && iCUE_initialized) { onReady(); } else { onReady(); }
+    </script>
+</body>
+</html>

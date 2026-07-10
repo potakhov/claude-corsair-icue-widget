@@ -1,0 +1,17 @@
+{
+    "Claude Usage": "Claude Usage",
+    "Connection": "Connection",
+    "Bridge URL": "Bridge URL",
+    "Bridge Token": "Bridge Token",
+    "Refresh": "Refresh",
+    "Show": "Show",
+    "Used": "Used",
+    "Left": "Left",
+    "Inactivity timeout": "Inactivity timeout",
+    "Paste the token from your .xeneon-bridge config.json, and keep the bridge running.": "Paste the token from your .xeneon-bridge config.json, and keep the bridge running.",
+    "Text Color": "Text Color",
+    "Accent Color": "Accent Color",
+    "Background Color": "Background Color",
+    "Background Transparency": "Background Transparency",
+    "Widget Personalization": "Widget Personalization"
+}
