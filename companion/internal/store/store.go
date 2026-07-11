@@ -18,6 +18,7 @@ type Store struct {
 	sessions      map[string]*protocol.Usage
 	sessionOrder  []string
 	notifications []protocol.Notification
+	notifSeq      int64
 	now           func() int64
 }
 
@@ -42,6 +43,8 @@ func (s *Store) SetUsage(u protocol.Usage) {
 func (s *Store) AddNotification(n protocol.Notification) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.notifSeq++
+	n.ID = s.notifSeq
 	n.At = s.now()
 	s.notifications = append(s.notifications, n)
 	if len(s.notifications) > 10 {

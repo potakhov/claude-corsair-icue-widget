@@ -9,7 +9,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: xeneon-bridge <serve|service|statusline|hook>")
+		fmt.Fprintln(os.Stderr, "usage: xeneon-bridge <serve|service|statusline|notify|hook>")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -47,6 +47,11 @@ func main() {
 		}
 	case "statusline":
 		if err := cmds.Statusline(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+	case "notify":
+		if err := cmds.NotifyManual(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}

@@ -12,6 +12,8 @@
     <meta name="x-icue-property" content="pollSeconds" data-label="tr('Refresh')" data-type="slider" data-default="2" data-min="1" data-max="30" data-step="1" data-unit-label="'s'" />
     <meta name="x-icue-property" content="framing" data-label="tr('Show')" data-type="tab-buttons" data-default="'used'" data-values="[{'key':'used','value':tr('Used')},{'key':'left','value':tr('Left')}]" />
     <meta name="x-icue-property" content="idleMinutes" data-label="tr('Inactivity timeout')" data-type="slider" data-default="30" data-min="1" data-max="180" data-step="1" data-unit-label="'m'" />
+    <meta name="x-icue-property" content="notifyEnabled" data-label="tr('Notifications')" data-type="tab-buttons" data-default="'on'" data-values="[{'key':'on','value':tr('On')},{'key':'off','value':tr('Off')}]" />
+    <meta name="x-icue-property" content="notifySeconds" data-label="tr('Notification duration')" data-type="slider" data-default="20" data-min="3" data-max="120" data-step="1" data-unit-label="'s'" />
 
     <!-- Personalization -->
     <meta name="x-icue-property" content="textColor" data-label="tr('Text Color')" data-type="color" data-default="'#ffffff'" />
@@ -22,6 +24,7 @@
     <script id="x-icue-groups" type="application/json">
     [
       { "title": "tr('Connection')", "properties": ["bridgeUrl", "bridgeToken", "pollSeconds", "framing", "idleMinutes"], "info": "tr('Paste the token from your .xeneon-bridge config.json, and keep the bridge running.')" },
+      { "title": "tr('Notifications')", "properties": ["notifyEnabled", "notifySeconds"] },
       { "title": "tr('Widget Personalization')", "properties": ["textColor", "accentColor", "backgroundColor", "transparency"] }
     ]
     </script>
@@ -172,7 +175,38 @@
         .costline { margin-top: 0; padding-top: 0; border-top: none; font-size: calc(var(--u)*3.5); }
       }
 
-      @media (prefers-reduced-motion: reduce) { .meter > span { transition: none; } }
+      /* ---- Notification toasts ---- */
+      .toasts {
+        position: fixed; left: var(--pad-x); right: var(--pad-x); bottom: var(--pad-y); z-index: 5;
+        display: flex; flex-direction: column; justify-content: flex-end;
+        gap: calc(var(--u)*2);
+        pointer-events: none;
+      }
+      .toast {
+        --toast-accent: var(--s-accent);
+        pointer-events: auto; position: relative; overflow: hidden;
+        background: color-mix(in oklab, var(--s-bg) 82%, #ffffff 11%);
+        border: calc(var(--u)*0.5) solid color-mix(in oklab, var(--toast-accent) 60%, transparent);
+        border-left: calc(var(--u)*1.4) solid var(--toast-accent);
+        border-radius: calc(var(--u)*2.5);
+        padding: calc(var(--u)*2.6) calc(var(--u)*3) calc(var(--u)*3.4);
+        box-shadow: 0 calc(var(--u)*2) calc(var(--u)*5.5) rgba(0,0,0,0.6),
+                    0 0 calc(var(--u)*4.5) color-mix(in oklab, var(--toast-accent) 42%, transparent);
+        opacity: 0; transform: translateY(calc(var(--u)*2));
+        transition: opacity 0.28s ease, transform 0.28s ease;
+      }
+      .toast.in { opacity: 1; transform: none; }
+      .toast.leaving { opacity: 0; transform: translateY(calc(var(--u)*1.5)); }
+      .toast.warn { --toast-accent: var(--sev-warn); }
+      .t-head { display: flex; align-items: baseline; justify-content: space-between; gap: calc(var(--u)*2); }
+      .t-title { font-size: calc(var(--u)*3.4); font-weight: 700; color: var(--s-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+      .t-x { flex: none; color: var(--s-muted); font-size: calc(var(--u)*3.4); font-weight: 700; line-height: 1; }
+      .t-msg { margin-top: calc(var(--u)*1.2); font-size: calc(var(--u)*3); color: var(--s-ink-2); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .t-bar { position: absolute; left: 0; bottom: 0; height: calc(var(--u)*0.9); background: var(--toast-accent); width: 100%; transition: width 0.2s linear; }
+
+      @media (min-aspect-ratio: 2.05/1) { .toasts { gap: calc(var(--u)*1.5); } .t-msg { display: none; } }
+
+      @media (prefers-reduced-motion: reduce) { .meter > span { transition: none; } .toast, .t-bar { transition: none; } }
     </style>
 </head>
 <body>
@@ -213,6 +247,7 @@
             </div>
         </div>
     </div>
+    <div class="toasts" id="toasts"></div>
     <div class="overlay" id="overlay"><div class="overlay-msg" id="overlayMsg"></div></div>
 
     <script>
@@ -307,6 +342,145 @@
       let lastNow = 0;             // bridge_time from the last poll (for tap re-render)
       let rotateTimer = null;
 
+      // --- Notifications ---
+      let notifQueues = {};    // session_id -> [toast], oldest first
+      let seenMaxId = null;    // high-water mark over Notification.id
+      const toastEls = new Map(); // toast id -> DOM element (render reconciler)
+      // toast = { id, sid, title, message, type, remainingMs, leavingAt }
+
+      function visibleToasts() {
+        const liveIds = new Set(liveSessions.map(s => (s.session_id || '')));
+        const out = [];
+        for (const sid in notifQueues) {
+          if (sid === pinnedId || !liveIds.has(sid)) out.push(...notifQueues[sid]); // active session + orphans
+        }
+        return out.sort((a, b) => a.id - b.id); // oldest first -> newest nearest the bottom edge
+      }
+
+      function buildToastEl(t) {
+        const el = document.createElement('div');
+        el.className = 'toast' + (/permission/i.test(t.type) ? ' warn' : '');
+        const head = document.createElement('div'); head.className = 't-head';
+        const title = document.createElement('span'); title.className = 't-title';
+        // Header: a real, specific title if the event gave one; otherwise promote the
+        // message (Claude's own text) so we never surface a generic "Notification" /
+        // "Claude Code" header. Known-generic titles are treated as no title.
+        const rawTitle = (t.title || '').trim();
+        const hasTitle = rawTitle && !/^(notification|claude code|claude)$/i.test(rawTitle);
+        const hdr = hasTitle ? rawTitle : (t.message || t.type || 'Claude');
+        title.textContent = hdr;
+        const x = document.createElement('span'); x.className = 't-x'; x.textContent = '✕';
+        head.appendChild(title); head.appendChild(x); el.appendChild(head);
+        // Body only when a distinct title carried the header — avoids repeating the
+        // message in both the header and the body for title-less events.
+        const body = hasTitle ? (t.message || '') : '';
+        if (body && body !== hdr) {
+          const m = document.createElement('div'); m.className = 't-msg';
+          m.textContent = body; el.appendChild(m);
+        }
+        const bar = document.createElement('div'); bar.className = 't-bar'; bar.style.width = '100%'; el.appendChild(bar);
+        el.addEventListener('click', (e) => { e.stopPropagation(); dismissToast(t.id); });
+        return el;
+      }
+
+      function renderToasts() {
+        const cont = $('toasts');
+        const vis = visibleToasts();
+        const wanted = new Set(vis.map(t => t.id));
+        for (const [id, el] of toastEls) {
+          if (!wanted.has(id)) { el.remove(); toastEls.delete(id); }
+        }
+        const durMs = clamp(prop('notifySeconds', 20), 3, 120) * 1000;
+        for (const t of vis) {
+          let el = toastEls.get(t.id);
+          if (!el) {
+            el = buildToastEl(t);
+            cont.appendChild(el);
+            toastEls.set(t.id, el);
+            requestAnimationFrame(() => el.classList.add('in'));
+          }
+          el.querySelector('.t-bar').style.width =
+            Math.max(0, Math.min(100, (t.remainingMs / durMs) * 100)) + '%';
+          el.classList.toggle('leaving', !!t.leavingAt);
+        }
+      }
+
+      function autoSwitchTo(sid) {
+        if (sid === pinnedId) return;
+        const p = liveSessions.find(s => (s.session_id || '') === sid);
+        if (!p) return; // not in the switcher -> orphan, shown on the current screen
+        pinnedId = sid; lastUsage = p;
+        updateSwitcher(liveSessions); render(p, lastNow);
+      }
+
+      function ingestNotifications(st) {
+        const list = Array.isArray(st.notifications) ? st.notifications : [];
+        const maxId = list.reduce((m, n) => Math.max(m, (n && n.id) || 0), 0);
+        // Disabled: advance the mark and drop queued toasts so re-enabling shows
+        // only future notifications, not the backlog that arrived while silenced.
+        if (prop('notifyEnabled', 'on') === 'off') { seenMaxId = maxId; notifQueues = {}; renderToasts(); return; }
+        // First poll: baseline to whatever's present so we don't replay history.
+        if (seenMaxId === null) { seenMaxId = maxId; return; }
+        // Bridge restart: the buffer empties (ids restart from 1), so re-baseline to 0
+        // and let fresh ones show. A NON-empty buffer whose maxId dipped below the mark
+        // is just a stale / out-of-order poll (iCUE fires overlapping polls) — ignore it.
+        // Re-popping on a stale poll would reset a live toast's countdown and make the
+        // progress bar jump backward, so the mark below is kept strictly monotonic.
+        if (list.length === 0) { seenMaxId = 0; return; }
+        const durMs = clamp(prop('notifySeconds', 20), 3, 120) * 1000;
+        let newestSid = null;
+        for (const n of list) {
+          if (!n || (n.id || 0) <= seenMaxId) continue;
+          const sid = n.session_id || '';
+          const q = (notifQueues[sid] = notifQueues[sid] || []);
+          q.push({ id: n.id, sid, title: n.title || '', message: n.message || '', type: n.type || '', remainingMs: durMs, leavingAt: 0 });
+          if (q.length > 3) q.shift(); // cap 3 per session, evict oldest
+          newestSid = sid;
+        }
+        seenMaxId = Math.max(seenMaxId, maxId); // monotonic: never drop on a stale poll
+        if (newestSid !== null) { autoSwitchTo(newestSid); startToastTicker(); renderToasts(); }
+      }
+
+      let toastTicker = null;
+      let lastTickTs = 0;
+
+      function startToastTicker() {
+        if (toastTicker) return;
+        lastTickTs = Date.now();
+        toastTicker = setInterval(tickToasts, 200);
+      }
+      function stopToastTicker() {
+        if (toastTicker) { clearInterval(toastTicker); toastTicker = null; }
+      }
+
+      function tickToasts() {
+        const now = Date.now();
+        const dt = now - lastTickTs; lastTickTs = now;
+        const vis = new Set(visibleToasts().map(t => t.id));
+        let any = false;
+        for (const sid in notifQueues) {
+          const arr = notifQueues[sid].filter(t => !(t.leavingAt && now - t.leavingAt > 320)); // drop faded
+          if (arr.length) notifQueues[sid] = arr; else { delete notifQueues[sid]; continue; }
+          any = true;
+          for (const t of arr) {
+            if (t.leavingAt) continue;
+            if (vis.has(t.id)) {                         // only visible toasts count down (pause when hidden)
+              t.remainingMs -= dt;
+              if (t.remainingMs <= 0) t.leavingAt = now; // expire -> fade
+            }
+          }
+        }
+        renderToasts();
+        if (!any) stopToastTicker();
+      }
+
+      function dismissToast(id) {
+        for (const sid in notifQueues) {
+          const t = notifQueues[sid].find(x => x.id === id);
+          if (t && !t.leavingAt) { t.leavingAt = Date.now(); renderToasts(); return; }
+        }
+      }
+
       function onReady() {
         applyStyles();
         if (timer) clearInterval(timer);
@@ -342,7 +516,6 @@
         const now = (st && st.bridge_time != null) ? st.bridge_time : Math.floor(Date.now() / 1000);
         lastNow = now;
         const idleSecs = clamp(prop('idleMinutes', 30), 1, 180) * 60;
-
         // A session is shown only if it is within the inactivity timeout AND has
         // started doing real work. A freshly-launched or resume-transient session
         // posts once with $0 cost and 0 context, then goes silent — never list it.
@@ -360,20 +533,20 @@
           updateSwitcher(liveSessions);
           setDot('var(--s-muted)'); setFresh('idle');
           setOverlay('Waiting for Claude Code…', true);
-          return;
+        } else {
+          liveSessions = list;
+          // Sticky pin: keep the chosen session; only re-pick if it left the list.
+          let pinned = list.find(s => (s.session_id || '') === pinnedId);
+          if (!pinned) {
+            pinned = list.reduce((a, b) => ((b.received_at || 0) > (a.received_at || 0) ? b : a));
+            pinnedId = pinned.session_id || '';
+          }
+          lastUsage = pinned;
+          setOverlay('', false);
+          updateSwitcher(list);
+          render(pinned, now);
         }
-        liveSessions = list;
-
-        // Sticky pin: keep the chosen session; only re-pick if it left the list.
-        let pinned = list.find(s => (s.session_id || '') === pinnedId);
-        if (!pinned) {
-          pinned = list.reduce((a, b) => ((b.received_at || 0) > (a.received_at || 0) ? b : a));
-          pinnedId = pinned.session_id || '';
-        }
-        lastUsage = pinned;
-        setOverlay('', false);
-        updateSwitcher(list);
-        render(pinned, now);
+        ingestNotifications(st);
       }
 
       function updateSwitcher(live) {

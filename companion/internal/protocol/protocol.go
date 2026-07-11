@@ -16,6 +16,7 @@ type Usage struct {
 }
 
 type Notification struct {
+	ID        int64  `json:"id"`
 	Type      string `json:"type"`
 	Title     string `json:"title"`
 	Message   string `json:"message"`

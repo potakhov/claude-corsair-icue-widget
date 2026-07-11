@@ -80,7 +80,7 @@ Check it runs:
 
 ```powershell
 .\xeneon-bridge.exe
-# usage: xeneon-bridge <serve|service|statusline|hook>
+# usage: xeneon-bridge <serve|service|statusline|notify|hook>
 ```
 
 ---
@@ -205,6 +205,50 @@ input=$(cat)   # you almost certainly already have this line
 The `( … & )` subshell detaches the post, so your bar keeps rendering in well under a second even if
 the bridge is down or slow. Don't set `XENEON_WRAP_CMD` in this mode — here the bridge is used purely
 for its POST side effect, and your script owns the visible output.
+
+---
+
+## Notifications
+
+The widget pops Claude Code notifications — permission prompts and "Claude is waiting for your
+input" — over the dashboard: one per session, stacking when several arrive, auto-switching to the
+notifying session, and fading after a configurable time. **Tap a toast to dismiss it early.** Tune
+it under **Settings → Notifications** (`Notifications` on/off, `Notification duration` 3–120 s,
+default 20 s).
+
+### Test it without wiring anything
+
+With the bridge running, fire a notification by hand — it shows on the widget within one poll cycle:
+
+```bash
+xeneon-bridge notify --title "Permission needed" --message "Bash wants to run a command" --session <session-id>
+```
+
+`--session` is optional (omit it and the toast shows on whatever session is on screen); add
+`--type permission` for the amber "needs attention" styling.
+
+### Wire real notifications
+
+Add a `Notification` hook to `~/.claude/settings.json`, pointing at your `xeneon-bridge.exe`. The
+command runs through bash, so use **forward-slash paths**, and it is fully detached (`( … & )`) so a
+slow or down bridge can never stall Claude Code:
+
+```json
+"hooks": {
+  "Notification": [
+    { "hooks": [
+      { "type": "command",
+        "command": "input=$(cat); ( printf '%s' \"$input\" | \"C:/path/to/xeneon-bridge.exe\" hook notify >/dev/null 2>&1 & )" }
+    ] }
+  ]
+}
+```
+
+Replace `C:/path/to/xeneon-bridge.exe` with your actual binary — the same one your statusline uses.
+
+> **Editing `settings.json` mid-session doesn't take effect immediately.** Run `/hooks` once (or
+> restart Claude Code) so the running session picks up the new hook. After that, real Claude Code
+> notifications land on the Edge automatically — alongside whatever your terminal already shows.
 
 ---
 
