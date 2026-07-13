@@ -27,7 +27,7 @@ func Notify(stdin io.Reader) error {
 	if err != nil {
 		return nil
 	}
-	_ = client.New(baseURL(cfg.Port), cfg.Token).PostNotify(protocol.Notification{
+	_ = client.New(baseURL(cfg), cfg.Token).PostNotify(protocol.Notification{
 		Type:      firstNonEmpty(in.NotificationType, in.HookEventName),
 		Title:     in.Title,
 		Message:   in.Message,
@@ -61,7 +61,7 @@ func NotifyManual(args []string) error {
 	if err != nil {
 		return err
 	}
-	return client.New(baseURL(cfg.Port), cfg.Token).PostNotify(protocol.Notification{
+	return client.New(baseURL(cfg), cfg.Token).PostNotify(protocol.Notification{
 		Type:      *typ,
 		Title:     *title,
 		Message:   *message,

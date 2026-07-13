@@ -11,6 +11,7 @@ type Usage struct {
 	DurationMs       *int64   `json:"duration_ms,omitempty"`
 	Model            string   `json:"model,omitempty"`
 	Folder           string   `json:"folder,omitempty"`
+	Host             string   `json:"host,omitempty"`
 	SessionID        string   `json:"session_id,omitempty"`
 	ReceivedAt       int64    `json:"received_at"`
 }

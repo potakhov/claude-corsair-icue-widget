@@ -13,6 +13,8 @@ import (
 type Config struct {
 	Port  int    `json:"port"`
 	Token string `json:"token"`
+	Bind  string `json:"bind,omitempty"` // server: interface to listen on ("" = loopback only)
+	URL   string `json:"url,omitempty"`  // client: bridge base URL to post to ("" = loopback:port)
 }
 
 func programDataDir() string {

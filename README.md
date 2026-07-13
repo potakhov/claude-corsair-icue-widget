@@ -252,6 +252,67 @@ Replace `C:/path/to/xeneon-bridge.exe` with your actual binary — the same one 
 
 ---
 
+## Remote sessions (multi-machine)
+
+One bridge can serve Claude Code sessions from several machines — local ones over loopback,
+and remote ones (e.g. an SSH box) over your LAN. Remote sessions appear in the widget's
+`‹ folder · host n/m ›` switcher, labeled by hostname; local sessions show just the folder.
+
+**1. Expose the bridge (Windows box).** By default it listens on loopback only. To accept LAN
+connections, set `bind` in the bridge config (`C:\ProgramData\xeneon-bridge\config.json` for the
+service, or `%USERPROFILE%\.xeneon-bridge\config.json` for portable mode) and restart it:
+
+```json
+{ "port": 8787, "token": "…", "bind": "0.0.0.0" }
+```
+
+`"0.0.0.0"` = all interfaces; a specific LAN IP (e.g. `"192.168.1.50"`) exposes only that one and
+still keeps loopback for the local widget. Then allow the port through Windows Firewall (elevated):
+
+```
+netsh advfirewall firewall add rule name="Xeneon Bridge 8787" dir=in action=allow protocol=TCP localport=8787
+```
+
+Find the box's LAN IP with `ipconfig`. **Security:** the `X-Bridge-Token` is the only gate and it
+travels in cleartext over plain HTTP — only expose the bridge on a network you trust (home/office
+LAN or a VPN like Tailscale), never the open internet.
+
+**2. Build a Linux binary.** Cross-compile from the Windows box and copy it over:
+
+```bash
+GOOS=linux GOARCH=amd64 go -C companion build -o xeneon-bridge-linux .   # arm64 if the box is ARM
+ssh you@remote mkdir -p /home/you/bin
+scp companion/xeneon-bridge-linux you@remote:/home/you/bin/xeneon-bridge
+ssh you@remote chmod +x /home/you/bin/xeneon-bridge
+```
+
+**3. Point the remote box at the bridge.** Create `~/.xeneon-bridge/config.json` **by hand** with
+the Windows bridge's URL and the **same token** (do this before running any `xeneon-bridge` command,
+or it will auto-generate a fresh token that won't match):
+
+```json
+{ "url": "http://192.168.1.50:8787", "token": "<same-token-as-the-windows-bridge>" }
+```
+
+**4. Wire the remote statusline + Notification hook** — same patterns as the local box, with the
+Linux binary path. In the remote `~/.claude/statusline.sh`:
+
+```bash
+( printf '%s' "$input" | /home/you/bin/xeneon-bridge statusline >/dev/null 2>&1 & )
+```
+
+In the remote `~/.claude/settings.json`:
+
+```json
+"hooks": { "Notification": [ { "hooks": [ { "type": "command",
+  "command": "input=$(cat); ( printf '%s' \"$input\" | /home/you/bin/xeneon-bridge hook notify >/dev/null 2>&1 & )" } ] } ] }
+```
+
+Start a Claude session on the remote box — it shows up on the Edge labeled with its hostname, and
+its notifications pop there too.
+
+---
+
 ## Part 4 — Package the widget
 
 The widget source is in [`claudeusage/`](claudeusage/). To build the installable `.icuewidget`

@@ -2,11 +2,30 @@ package server
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 
 	"xeneoncc/internal/protocol"
 	"xeneoncc/internal/store"
 )
+
+// posterHost decides a session's host label from where its usage POST came from.
+// Loopback posters are local -> no label. Remote posters keep their self-reported
+// host, or fall back to their source IP if they sent none.
+func posterHost(remoteAddr, postedHost string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() {
+		return ""
+	}
+	if postedHost != "" {
+		return postedHost
+	}
+	return ip.String()
+}
 
 type Server struct {
 	store *store.Store
@@ -45,6 +64,7 @@ func (s *Server) postUsage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
+	u.Host = posterHost(r.RemoteAddr, u.Host)
 	s.store.SetUsage(u)
 	w.WriteHeader(http.StatusNoContent)
 }

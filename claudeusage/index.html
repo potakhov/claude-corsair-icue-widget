@@ -556,9 +556,10 @@
         if (!multi) { stopRotate(); return; }
         const idx = Math.max(0, live.findIndex(s => (s.session_id || '') === pinnedId));
         const cur = live[idx] || live[0];
-        const label = (cur.folder && String(cur.folder).trim())
+        const base = (cur.folder && String(cur.folder).trim())
           || (cur.model || '').replace(/\s*\(.*$/, '')
           || 'session';
+        const label = base + (cur.host ? '  ·  ' + cur.host : '');
         $('swLabel').textContent = label + '  ' + (idx + 1) + '/' + live.length;
         const tap = (SWITCH_MODE === 'tap');
         $('swPrev').style.display = tap ? '' : 'none';

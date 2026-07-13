@@ -24,7 +24,7 @@ func Statusline(stdin io.Reader, stdout io.Writer) error {
 	var in claudecode.StatuslineInput
 	if json.Unmarshal(raw, &in) == nil {
 		if cfg, err := config.Load(); err == nil {
-			_ = client.New(baseURL(cfg.Port), cfg.Token).PostUsage(mapUsage(in))
+			_ = client.New(baseURL(cfg), cfg.Token).PostUsage(mapUsage(in))
 		}
 	}
 
@@ -42,6 +42,9 @@ func Statusline(stdin io.Reader, stdout io.Writer) error {
 
 func mapUsage(in claudecode.StatuslineInput) protocol.Usage {
 	u := protocol.Usage{Model: in.Model.DisplayName, SessionID: in.SessionID}
+	if h, err := os.Hostname(); err == nil {
+		u.Host = h
+	}
 	u.Folder = baseName(in.Workspace.ProjectDir)
 	cost := in.Cost.TotalCostUSD
 	u.CostUSD = &cost
